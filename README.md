@@ -1,5 +1,6 @@
-# lambda-template
-A GitHub template for quickly starting a new AWS lambda project.
+# lambda-finops-floqast-sftp
+AWS Lambda to periodically fetch balance CSV files from lamba-mips-api and upload
+them to FloQast via SFTP.
 
 ## Naming
 Naming conventions:
@@ -75,7 +76,7 @@ Running integration tests
 [requires docker](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-cli-command-reference-sam-local-start-api.html)
 
 ```shell script
-$ sam local invoke HelloWorldFunction --event events/event.json
+$ sam local invoke FloQastSftpFunction --event events/event.json
 ```
 
 ## Deployment
@@ -90,9 +91,9 @@ which requires permissions to upload to Sage
 ```shell script
 sam package --template-file .aws-sam/build/template.yaml \
   --s3-bucket essentials-awss3lambdaartifactsbucket-x29ftznj6pqw \
-  --output-template-file .aws-sam/build/lambda-template.yaml
+  --output-template-file .aws-sam/build/lambda-finops-floqast-sftp.yaml
 
-aws s3 cp .aws-sam/build/lambda-template.yaml s3://bootstrap-awss3cloudformationbucket-19qromfd235z9/lambda-template/main/
+aws s3 cp .aws-sam/build/lambda-finops-floqast-sftp.yaml s3://bootstrap-awss3cloudformationbucket-19qromfd235z9/lambda-finops-floqast-sftp/main/
 ```
 
 ## Publish Lambda
@@ -102,7 +103,7 @@ Publishing the lambda makes it available in your AWS account.  It will be access
 the [serverless application repository](https://console.aws.amazon.com/serverlessrepo).
 
 ```shell script
-sam publish --template .aws-sam/build/lambda-template.yaml
+sam publish --template .aws-sam/build/lambda-finops-floqast-sftp.yaml
 ```
 
 ### Public access
@@ -119,13 +120,13 @@ aws serverlessrepo put-application-policy \
 
 ### Sceptre
 Create the following [sceptre](https://github.com/Sceptre/sceptre) file
-config/prod/lambda-template.yaml
+config/prod/lambda-finops-floqast-sftp.yaml
 
 ```yaml
 template:
   type: http
-  url: "https://PUBLISH_BUCKET.s3.amazonaws.com/lambda-template/VERSION/lambda-template.yaml"
-stack_name: "lambda-template"
+  url: "https://PUBLISH_BUCKET.s3.amazonaws.com/lambda-finops-floqast-sftp/VERSION/lambda-finops-floqast-sftp.yaml"
+stack_name: "lambda-finops-floqast-sftp"
 stack_tags:
   Department: "Platform"
   Project: "Infrastructure"
@@ -134,7 +135,7 @@ stack_tags:
 
 Install the lambda using sceptre:
 ```shell script
-sceptre --var "profile=my-profile" --var "region=us-east-1" launch prod/lambda-template.yaml
+sceptre --var "profile=my-profile" --var "region=us-east-1" launch prod/lambda-finops-floqast-sftp.yaml
 ```
 
 ### AWS Console

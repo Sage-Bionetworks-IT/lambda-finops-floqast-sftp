@@ -6,11 +6,15 @@ verify_ssl = true
 [dev-packages]
 pytest = "~=7.1"
 pytest-mock = "~=3.8"
+requests-mock = "~=1.10"
+paramiko-mock = "~=1.0"
 boto3 = "~=1.24"
 coverage = "~=7.3"
 
 [packages]
 crhelper = "~=2.0"
+paramiko = "~=3.5"
+requests = "~=2.32"
 
 [requires]
 python_version = "3.12"
