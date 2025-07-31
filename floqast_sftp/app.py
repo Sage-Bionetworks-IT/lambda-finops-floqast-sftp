@@ -9,10 +9,30 @@ import paramiko
 
 import requests
 
+logging.basicConfig(level=logging.INFO)
 
 ssm_client = None
 
-_csv_url = "https://mips-api.finops.sageit.org/balances?show_inactive_codes"
+
+def get_event_param(event, param):
+    """
+    Get the value of a query-string parameter from the EventBridge event.
+
+    Parameters
+    ----------
+    event: dict
+        EventBridge object passed to lambda handler
+
+    Returns
+    -------
+    str
+       The value of the specified query-string parameter
+
+    """
+    if param not in event:
+        raise ValueError(f"{param} not provided")
+
+    return event[param]
 
 
 def get_ssm_params(prefix):
@@ -85,7 +105,7 @@ def get_sftp_client(auth):
     transport = paramiko.Transport((auth["host"], auth["port"]))
     transport.connect(username=auth["user"], password=auth["pass"])
     client = paramiko.SFTPClient.from_transport(transport)
-    return client
+    return transport, client
 
 
 def get_file_name(_period):
@@ -113,6 +133,35 @@ def get_file_name(_period):
     return name
 
 
+def get_period_count(event):
+    """
+    Parse the period count from the EventBridge event dictionary, ensuring
+    the value is an integer.
+
+    Parameters
+    ----------
+    event: dict
+        Event dictionary passed to lambda_handler
+
+    Returns
+    -------
+    int
+        Number of periods requested.
+
+    """
+
+    count_str = get_event_param(event, "period_count")
+    try:
+        period_count = int(count_str)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("'period_count' must be an integer.") from exc
+
+    if period_count < 1:
+        raise ValueError("'period_count' must be greater than 0")
+
+    return period_count
+
+
 def get_previous_month(_date):
     """
     Calculate the date one month previous to the given date.
@@ -136,14 +185,44 @@ def get_previous_month(_date):
     return _date.replace(month=_month)
 
 
-def get_balances_csv(when):
+def get_csv_url(event, when):
+    """
+    Build the query-string parameters for the lambda-mips-api balances endpoint
+    from the EventBridge event.
+
+    Parameters
+    ----------
+    event: dict
+        EventBridge object passed to lambda handler
+
+    when: str
+        ISO-8601 formatted string specifying a date (YYYY-MM-DD).
+
+    Returns
+    -------
+    str
+        URL to lambda-mips-api balances csv endpoint.
+
+    """
+
+    base_url = get_event_param(event, "mip_api_balances_url")
+    logging.info(f"Building balances url from {base_url}")
+    url_add = f"show_inactive_codes&target_date={when}"
+    if "?" in base_url:
+        full_url = f"{base_url}&{url_add}"
+    else:
+        full_url = f"{base_url}?{url_add}"
+    return full_url
+
+
+def get_balances_csv(url):
     """
     Fetch the balances CSV from lambda-mips-api for the given activity period.
 
     Parameters
     ----------
-    when: datetime.date
-        Date to pass to lambda-mips-api for calculating the balance activity period.
+    url: str
+        URL to lambda-mips-api balances endpoint
 
     Returns
     -------
@@ -151,8 +230,7 @@ def get_balances_csv(when):
         Tuple of file name and a file-like object.
 
     """
-    url = _csv_url + f"&target_date={when}"
-
+    # get url and create file object from response
     response = requests.get(url, stream=True)
     response.raise_for_status()
     file_obj = io.StringIO(response.text)
@@ -189,7 +267,12 @@ def put_sftp_file(client, name, file_obj):
     None
 
     """
-    client.putfo(fl=file_obj, remotepath=name)
+    logging.info(f"Uploading {name} to SFTP server")
+    try:
+        client.putfo(fl=file_obj, remotepath=name, confirm=True)
+    except Exception as exc:
+        logging.error(f"Failed to upload file '{name}'")
+        raise exc
 
 
 def lambda_handler(event, context):
@@ -198,46 +281,43 @@ def lambda_handler(event, context):
     Parameters
     ----------
     event: dict, required
-        API Gateway Lambda Proxy Input Format
-
-        Event doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html#api-gateway-simple-proxy-for-lambda-input-format
+        The EventBridge event payload containing the following required keys:
+        - ssm_secret_prefix: str
+            The prefix for fetching secrets from AWS Systems Manager Parameter Store.
+        - period_count: int
+            The number of months to retrieve balances for. Must be greater than 0.
 
     context: object, required
-        Lambda Context runtime methods and attributes
-
-        Context doc: https://docs.aws.amazon.com/lambda/latest/dg/python-context-object.html
+        Lambda Context runtime methods and attributes.
+        See AWS Lambda documentation for details:
+        https://docs.aws.amazon.com/lambda/latest/dg/python-context-object.html
 
     Returns
-    ------
-    API Gateway Lambda Proxy Output Format: dict
-
-        Return doc: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
+    -------
+    None
     """
 
-    # get secrets from SSM
-    if "ssm_secret_prefix" not in event:
-        raise ValueError("'ssm_secret_prefix' not provided")
-    ssm_prefix = event["ssm_secret_prefix"]
-    auth = get_ssm_params(ssm_prefix)
-    client = get_sftp_client(auth)
-
     # number of months to get balances for
-    if "period_count" not in event:
-        raise ValueError("'period_count' not provided")
-    period_count = event["period_count"]
-    if period_count < 1:
-        raise ValueError("'period_count' must be greater than 0")
+    period_count = get_period_count(event)
+    logging.info(f"Getting balances for past {period_count} months")
+
+    # get secrets from SSM and authenticate
+    ssm_prefix = get_event_param(event, "ssm_secret_prefix")
+    auth = get_ssm_params(ssm_prefix)
+    logging.info(f"Logging in to SFTP server")
+    transport, client = get_sftp_client(auth)
 
     # Start with today, and go back N months
-    period = date.today()
-    for _ in range(period_count):
-        when = period.isoformat()
-        name, file_obj = get_balances_csv(when)
-        put_sftp_file(client, name, file_obj)
-        period = get_previous_month(period)
-
-    #
-    return {
-        "statusCode": 200,
-        "body": json.dumps({"Success": True}),
-    }
+    try:
+        period = date.today()
+        for _ in range(period_count):
+            when = period.isoformat()
+            url = get_csv_url(event, when)
+            name, file_obj = get_balances_csv(url)
+            put_sftp_file(client, name, file_obj)
+            period = get_previous_month(period)
+        logging.info(f"File uploads complete")
+    finally:
+        # Always close the SFTP session and transport
+        client.close()
+        transport.close()

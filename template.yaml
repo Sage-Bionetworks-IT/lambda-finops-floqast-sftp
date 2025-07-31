@@ -1,21 +1,23 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
+Transform:
+  - AWS::LanguageExtensions
+  - AWS::Serverless-2016-10-31
 Description: >
-  Lambda to upload MIP balance CSV files to FloQast via SFTP.
+  Lambda to download Trial Balance CSV files from lambda-mips-api and upload them to FloQast via SFTP
 
 Metadata:
   AWS::ServerlessRepo::Application:
     Name: "lambda-finops-floqast-sftp"
-    Description: "A GH template for quickly starting a new AWS lambda project."
+    Description: "An AWS lambda to download Trial Balance CSV files from lambda-mips-api and upload them to FloQast via SFTP"
     Author: "Sage-Bionetworks"
     SpdxLicenseId: "Apache-2.0"
     # paths are relative to .aws-sam/build directory
     LicenseUrl: "LICENSE"
     ReadmeUrl: "README.md"
-    Labels: ["serverless", "template", "github", "quick-start"]
+    Labels: ["serverless", "finops", "floqast", "sftp"]
     HomePageUrl: "https://github.com/Sage-Bionetworks-IT/lambda-finops-floqast-sftp"
-    SemanticVersion: "0.0.3"
-    SourceCodeUrl: "https://github.com/Sage-Bionetworks-IT/lambda-finops-floqast-sftp/tree/0.0.3"
+    SemanticVersion: "1.0.0"
+    SourceCodeUrl: "https://github.com/Sage-Bionetworks-IT/lambda-finops-floqast-sftp/tree/1.0.0"
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
@@ -28,8 +30,24 @@ Parameters:
       Schedule to execute the lambda, can be a rate or a cron schedule. Format at
       https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html
     Type: String
-    Default: cron(0 4 * * ? *)  # Run at 8pm PDT (4am UTC)
+    # Run Sundays at 8pm PDT (UTC: Mondays at 4am)
+    Default: cron(0 4 ? * MON *)
     ConstraintDescription: "Use schedule format: https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html"
+  SsmPrefix:
+    Type: String
+    Default: '/floqast-sftp'
+    Description: >-
+      Prefix for SSM parameter paths for SFTP authentication secrets
+  PeriodCount:
+    Type: Number
+    Default: "2"
+    Description: >-
+      The number of 1-month activity periods to query for trial balances.
+  MipApiBalances:
+    Type: String
+    Default: "https://mips-api.finops.sageit.org/balances"
+    Description: >-
+      The URL to the balances endpoint of lambda-mips-api.
 
 Resources:
   FloQastSftpFunction:
@@ -46,14 +64,12 @@ Resources:
           Type: Schedule
           Properties:
             Schedule: !Ref Schedule
-            # JSON data passed to the lambda function as 'event',
-            # The resource types need to match `ResourceTypeFilters` at
-            # https://github.com/Sage-Bionetworks-IT/organizations-infra/blob/master/org-formation/090-systems-manager/patch-resource-group.yaml
-            Input: |-
-              {
-                "ssm_secret_prefix": "/floqast-sftp",
-                "period_count": "1",
-              }
+            # JSON data passed to the lambda function as 'event' object
+            Input:
+              'Fn::ToJsonString':
+                ssm_secret_prefix: !Ref SsmPrefix
+                period_count: !Ref PeriodCount
+                mip_api_balances_url: !Ref MipApiBalances
 
   FunctionRole:   # execute lambda function with this role
     Type: AWS::IAM::Role

@@ -1,12 +1,49 @@
 # lambda-finops-floqast-sftp
-AWS Lambda to periodically fetch balance CSV files from lamba-mips-api and upload
-them to FloQast via SFTP.
 
-## Naming
-Naming conventions:
-* for a vanilla Lambda: `lambda-<context>`
-* for a Cloudformation Transform macro: `cfn-macro-<context>`
-* for a Cloudformation Custom Resource: `cfn-cr-<context>`
+AWS Lambda to periodically fetch trial balances from lambda-mips-api as CSV files
+and upload them to FloQast via SFTP.
+
+The activity period for the trial balances is one month, or month-to-date for the
+current month. A configurable number of activity periods will be fetched, starting
+with the current month and moving backwards. A separate CSV file will be fetched
+for each activity period, and uploaded to the specified SFTP server with a unique
+file name.
+
+## Parameters
+
+### SSM Parameters
+
+User credentials for logging in to the SFTP server are stored as secure
+parameters in SSM with a configurable prefix. By default, the prefix is `/floqast-sftp`.
+
+#### Required SSM Parameters
+
+The `user`, `pass`, and `host` parameters are required for SFTP authentication.
+
+| Parameter | Description    |
+|-----------|----------------|
+| user      | SFTP username  |
+| pass      | SFTP password  |
+| host      | SFTP host name |
+
+#### Optional SSM Parameter
+
+An optional `port` parameter can be used to configure the host port.
+
+| Parameter | Description    | Default |
+|-----------|----------------|--------|
+| port      | SFTP host port | 22     |
+
+### Template Parameters
+
+The following template parameters are used to configure behavior:
+
+| Template Parameter | Type                            | Default               | Description                                                                                        |
+|---------------------|---------------------------------|-----------------------|----------------------------------------------------------------------------------------------------|
+| Schedule            | EventBridge Schedule Expression | `cron(30 10 2 * ? *)` | EventBridge schedule for running the lambda                                                        |
+| SsmPrefix           | String                          | /floqast-sftp         | Prepend this value to the SSM parameter keys                                                       |
+| PeriodCount         | Number                          | 2                     | The number of activity periods (months) to report on, starting at the present and moving backwards |
+
 
 ## Development
 
