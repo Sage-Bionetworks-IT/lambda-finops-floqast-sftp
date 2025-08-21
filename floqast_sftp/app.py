@@ -1,6 +1,5 @@
 import csv
 import io
-import json
 import logging
 from datetime import date, datetime
 
@@ -9,7 +8,8 @@ import paramiko
 
 import requests
 
-logging.basicConfig(level=logging.INFO)
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.DEBUG)
 
 ssm_client = None
 
@@ -64,7 +64,8 @@ def get_ssm_params(prefix):
     params = {}
     for p in response["Parameters"]:
         # strip prefix from key
-        _key = p["Name"][len(prefix) :]
+        _key = p["Name"].split("/")[-1]
+        LOG.debug(f"Found SSM parameter {_key}")
         params[_key] = p["Value"]
 
     # check for required strings
@@ -206,12 +207,12 @@ def get_csv_url(event, when):
     """
 
     base_url = get_event_param(event, "mip_api_balances_url")
-    logging.info(f"Building balances url from {base_url}")
     url_add = f"show_inactive_codes&target_date={when}"
     if "?" in base_url:
         full_url = f"{base_url}&{url_add}"
     else:
         full_url = f"{base_url}?{url_add}"
+    LOG.info(f"Getting balances from {full_url}")
     return full_url
 
 
@@ -267,11 +268,11 @@ def put_sftp_file(client, name, file_obj):
     None
 
     """
-    logging.info(f"Uploading {name} to SFTP server")
+    LOG.info(f"Uploading {name} to SFTP server")
     try:
         client.putfo(fl=file_obj, remotepath=name, confirm=True)
     except Exception as exc:
-        logging.error(f"Failed to upload file '{name}'")
+        LOG.error(f"Failed to upload file '{name}'")
         raise exc
 
 
@@ -299,12 +300,12 @@ def lambda_handler(event, context):
 
     # number of months to get balances for
     period_count = get_period_count(event)
-    logging.info(f"Getting balances for past {period_count} months")
+    LOG.info(f"Getting balances for past {period_count} months")
 
     # get secrets from SSM and authenticate
     ssm_prefix = get_event_param(event, "ssm_secret_prefix")
     auth = get_ssm_params(ssm_prefix)
-    logging.info(f"Logging in to SFTP server")
+    LOG.info(f"Logging in to SFTP server")
     transport, client = get_sftp_client(auth)
 
     # Start with today, and go back N months
@@ -316,8 +317,9 @@ def lambda_handler(event, context):
             name, file_obj = get_balances_csv(url)
             put_sftp_file(client, name, file_obj)
             period = get_previous_month(period)
-        logging.info(f"File uploads complete")
     finally:
         # Always close the SFTP session and transport
         client.close()
         transport.close()
+
+    LOG.info(f"File uploads complete")

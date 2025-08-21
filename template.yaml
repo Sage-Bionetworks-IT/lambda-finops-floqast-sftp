@@ -22,7 +22,7 @@ Metadata:
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 240
 
 Parameters:
   Schedule:
@@ -33,11 +33,6 @@ Parameters:
     # Run Sundays at 8pm PDT (UTC: Mondays at 4am)
     Default: cron(0 4 ? * MON *)
     ConstraintDescription: "Use schedule format: https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html"
-  SsmPrefix:
-    Type: String
-    Default: '/floqast-sftp'
-    Description: >-
-      Prefix for SSM parameter paths for SFTP authentication secrets
   PeriodCount:
     Type: Number
     Default: "2"
@@ -48,6 +43,18 @@ Parameters:
     Default: "https://mips-api.finops.sageit.org/balances"
     Description: >-
       The URL to the balances endpoint of lambda-mips-api.
+  SsmPrefix:
+    Type: String
+    Default: '/floqast-sftp'
+    Description: >-
+      Prefix for SSM parameter paths for SFTP authentication secrets
+  KmsKeyAdminArns:
+    Type: CommaDelimitedList
+    Description: List of role ARNs to manage the encryption key
+  KmsAliasPrefix:
+    Type: String
+    Default: lambda-finops-floqast-sftp
+    Description: Prefix used in the KMS Key Alias name
 
 Resources:
   FloQastSftpFunction:
@@ -85,6 +92,65 @@ Resources:
               - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}'
+                Action:
+                  - 'ssm:GetParameter*'
+                Effect: Allow
+
+  # Key for encrypting our secret parameter
+  # The secret parameter will need to be created manually in SSM
+  # https://aws.amazon.com/blogs/compute/sharing-secrets-with-aws-lambda-using-aws-systems-manager-parameter-store/
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Enabled: True
+      EnableKeyRotation: True
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Lambda Access
+            Principal:
+              AWS: !GetAtt FunctionRole.Arn
+            Resource: '*'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Effect: Allow
+          - Sid: Admin Access
+            Principal:
+              AWS: !Ref KmsKeyAdminArns
+            Resource: '*'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Encrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:Decrypt'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Effect: Allow
+
+  KmsAlias:  # A friendly name used in the console
+    Type: AWS::KMS::Alias
+    Properties:
+      TargetKeyId: !Ref KmsKey
+      AliasName: !Sub 'alias/${KmsAliasPrefix}-key'
 
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
