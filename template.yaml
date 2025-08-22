@@ -1,41 +1,82 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
+Transform:
+  - AWS::LanguageExtensions
+  - AWS::Serverless-2016-10-31
 Description: >
-  Hello World lambda
+  Lambda to download Trial Balance CSV files from lambda-mips-api and upload them to FloQast via SFTP
 
 Metadata:
   AWS::ServerlessRepo::Application:
-    Name: "lambda-template"
-    Description: "A GH template for quickly starting a new AWS lambda project."
+    Name: "lambda-finops-floqast-sftp"
+    Description: "An AWS lambda to download Trial Balance CSV files from lambda-mips-api and upload them to FloQast via SFTP"
     Author: "Sage-Bionetworks"
     SpdxLicenseId: "Apache-2.0"
     # paths are relative to .aws-sam/build directory
     LicenseUrl: "LICENSE"
     ReadmeUrl: "README.md"
-    Labels: ["serverless", "template", "github", "quick-start"]
-    HomePageUrl: "https://github.com/Sage-Bionetworks-IT/lambda-template"
-    SemanticVersion: "0.0.3"
-    SourceCodeUrl: "https://github.com/Sage-Bionetworks-IT/lambda-template/tree/0.0.3"
+    Labels: ["serverless", "finops", "floqast", "sftp"]
+    HomePageUrl: "https://github.com/Sage-Bionetworks-IT/lambda-finops-floqast-sftp"
+    SemanticVersion: "1.0.0"
+    SourceCodeUrl: "https://github.com/Sage-Bionetworks-IT/lambda-finops-floqast-sftp/tree/1.0.0"
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 240
+
+Parameters:
+  Schedule:
+    Description: >-
+      Schedule to execute the lambda, can be a rate or a cron schedule. Format at
+      https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html
+    Type: String
+    # Run Sundays at 8pm PDT (UTC: Mondays at 4am)
+    Default: cron(0 4 ? * MON *)
+    ConstraintDescription: "Use schedule format: https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/ScheduledEvents.html"
+  PeriodCount:
+    Type: Number
+    Default: "2"
+    Description: >-
+      The number of 1-month activity periods to query for trial balances.
+  MipApiBalances:
+    Type: String
+    Default: "https://mips-api.finops.sageit.org/balances"
+    Description: >-
+      The URL to the balances endpoint of lambda-mips-api.
+  SsmPrefix:
+    Type: String
+    Default: '/floqast-sftp'
+    Description: >-
+      Prefix for SSM parameter paths for SFTP authentication secrets
+  KmsKeyAdminArns:
+    Type: CommaDelimitedList
+    Description: List of role ARNs to manage the encryption key
+  KmsAliasPrefix:
+    Type: String
+    Default: lambda-finops-floqast-sftp
+    Description: Prefix used in the KMS Key Alias name
 
 Resources:
-  HelloWorldFunction:
+  FloQastSftpFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       CodeUri: .
-      Handler: hello_world/app.lambda_handler
+      Handler: floqast_sftp/app.lambda_handler
       Runtime: python3.12
       Role: !GetAtt FunctionRole.Arn
       Events:
-        HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+        Schedule:
+          # More info about Event Source:
+          # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#schedule
+          Type: Schedule
           Properties:
-            Path: /hello
-            Method: get
+            Schedule: !Ref Schedule
+            # JSON data passed to the lambda function as 'event' object
+            Input:
+              'Fn::ToJsonString':
+                ssm_secret_prefix: !Ref SsmPrefix
+                period_count: !Ref PeriodCount
+                mip_api_balances_url: !Ref MipApiBalances
 
   FunctionRole:   # execute lambda function with this role
     Type: AWS::IAM::Role
@@ -51,17 +92,73 @@ Resources:
               - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}'
+                Action:
+                  - 'ssm:GetParameter*'
+                Effect: Allow
+
+  # Key for encrypting our secret parameter
+  # The secret parameter will need to be created manually in SSM
+  # https://aws.amazon.com/blogs/compute/sharing-secrets-with-aws-lambda-using-aws-systems-manager-parameter-store/
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Enabled: True
+      EnableKeyRotation: True
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Lambda Access
+            Principal:
+              AWS: !GetAtt FunctionRole.Arn
+            Resource: '*'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Effect: Allow
+          - Sid: Admin Access
+            Principal:
+              AWS: !Ref KmsKeyAdminArns
+            Resource: '*'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Encrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:Decrypt'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Effect: Allow
+
+  KmsAlias:  # A friendly name used in the console
+    Type: AWS::KMS::Alias
+    Properties:
+      TargetKeyId: !Ref KmsKey
+      AliasName: !Sub 'alias/${KmsAliasPrefix}-key'
 
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  HelloWorldApi:
-    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"
-  HelloWorldFunctionArn:
-    Description: "Hello World Lambda Function ARN"
-    Value: !GetAtt HelloWorldFunction.Arn
-  HelloWorldFunctionRoleArn:
-    Description: "Implicit IAM Role created for Hello World function"
+  FloQastSftpFunctionArn:
+    Description: "FloQast SFTP Lambda Function ARN"
+    Value: !GetAtt FloQastSftpFunction.Arn
+  FloQastSftpFunctionRoleArn:
+    Description: "Implicit IAM Role created for FloQast SFTP function"
     Value: !GetAtt FunctionRole.Arn
