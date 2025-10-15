@@ -1,6 +1,7 @@
 import csv
 import io
 import logging
+import time
 from datetime import date, datetime
 
 import boto3
@@ -317,6 +318,7 @@ def lambda_handler(event, context):
             name, file_obj = get_balances_csv(url)
             put_sftp_file(client, name, file_obj)
             period = get_previous_month(period)
+            time.sleep(1)
     finally:
         # Always close the SFTP session and transport
         client.close()
