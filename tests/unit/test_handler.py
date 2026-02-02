@@ -12,7 +12,6 @@ from botocore.stub import Stubber
 
 from floqast_sftp import app
 
-
 test_ssm_prefix = "test-secrets/"
 test_ssm_values = {
     "user": "username",
