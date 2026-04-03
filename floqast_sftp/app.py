@@ -6,6 +6,8 @@ from datetime import date, datetime
 
 import boto3
 import paramiko
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 
 import requests
 
@@ -13,6 +15,7 @@ LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
 
 ssm_client = None
+_session = boto3.Session()
 
 
 def get_event_param(event, param):
@@ -217,14 +220,42 @@ def get_csv_url(event, when):
     return full_url
 
 
-def get_balances_csv(url):
+def sign_request(url, region):
+    """
+    Sign an HTTP GET request with SigV4 for IAM-authenticated API Gateway access.
+
+    Parameters
+    ----------
+    url: str
+        The full URL to sign.
+
+    region: str
+        AWS region of the API Gateway (e.g. 'us-east-1').
+
+    Returns
+    -------
+    dict
+        HTTP headers containing the SigV4 authorization signature.
+    """
+    credentials = _session.get_credentials().get_frozen_credentials()
+    aws_request = AWSRequest(method="GET", url=url)
+    SigV4Auth(credentials, "execute-api", region).add_auth(aws_request)
+    return dict(aws_request.headers)
+
+
+def get_balances_csv(url, region=None):
     """
     Fetch the balances CSV from lambda-mips-api for the given activity period.
+    If a region is provided, the request will be signed with SigV4 for
+    IAM-authenticated API Gateway access.
 
     Parameters
     ----------
     url: str
         URL to lambda-mips-api balances endpoint
+
+    region: str, optional
+        AWS region for SigV4 signing. If None, request is unsigned.
 
     Returns
     -------
@@ -232,8 +263,8 @@ def get_balances_csv(url):
         Tuple of file name and a file-like object.
 
     """
-    # get url and create file object from response
-    response = requests.get(url, stream=True)
+    headers = sign_request(url, region) if region else {}
+    response = requests.get(url, headers=headers, stream=True)
     response.raise_for_status()
     file_obj = io.StringIO(response.text)
 
@@ -311,11 +342,13 @@ def lambda_handler(event, context):
 
     # Start with today, and go back N months
     try:
+        # Get the API region for SigV4 signing (optional)
+        api_region = event.get("mip_api_region")
         period = date.today()
         for _ in range(period_count):
             when = period.isoformat()
             url = get_csv_url(event, when)
-            name, file_obj = get_balances_csv(url)
+            name, file_obj = get_balances_csv(url, region=api_region)
             put_sftp_file(client, name, file_obj)
             period = get_previous_month(period)
             time.sleep(1)
