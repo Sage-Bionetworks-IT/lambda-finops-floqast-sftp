@@ -40,14 +40,27 @@ Parameters:
       The number of 1-month activity periods to query for trial balances.
   MipApiBalances:
     Type: String
-    Default: "https://mips-api.finops.sageit.org/balances"
+    Default: ""
     Description: >-
-      The URL to the balances endpoint of lambda-mips-api.
+      The API Gateway URL to the balances endpoint of lambda-mips-api.
+      Must be the API Gateway execute-api URL (not CloudFront) for IAM auth.
+      Example: https://API_ID.execute-api.us-east-1.amazonaws.com/Prod/balances
+  MipApiRegion:
+    Type: String
+    Default: "us-east-1"
+    Description: >-
+      The AWS region of the lambda-mips-api API Gateway.
+      Used for SigV4 request signing.
   SsmPrefix:
     Type: String
     Default: '/floqast-sftp'
     Description: >-
       Prefix for SSM parameter paths for SFTP authentication secrets
+  MipApiExecuteArn:
+    Type: String
+    Description: >-
+      ARN for execute-api:Invoke on the mips-api API Gateway /balances endpoint.
+      Format: arn:aws:execute-api:REGION:ACCOUNT:API_ID/STAGE/GET/balances
   KmsKeyAdminArns:
     Type: CommaDelimitedList
     Description: List of role ARNs to manage the encryption key
@@ -77,6 +90,7 @@ Resources:
                 ssm_secret_prefix: !Ref SsmPrefix
                 period_count: !Ref PeriodCount
                 mip_api_balances_url: !Ref MipApiBalances
+                mip_api_region: !Ref MipApiRegion
 
   FunctionRole:   # execute lambda function with this role
     Type: AWS::IAM::Role
@@ -100,6 +114,10 @@ Resources:
               - Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}'
                 Action:
                   - 'ssm:GetParameter*'
+                Effect: Allow
+              - Resource: !Ref MipApiExecuteArn
+                Action:
+                  - 'execute-api:Invoke'
                 Effect: Allow
 
   # Key for encrypting our secret parameter
@@ -153,9 +171,6 @@ Resources:
       AliasName: !Sub 'alias/${KmsAliasPrefix}-key'
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
   FloQastSftpFunctionArn:
     Description: "FloQast SFTP Lambda Function ARN"
     Value: !GetAtt FloQastSftpFunction.Arn

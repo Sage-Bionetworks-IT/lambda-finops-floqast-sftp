@@ -9,6 +9,16 @@ with the current month and moving backwards. A separate CSV file will be fetched
 for each activity period, and uploaded to the specified SFTP server with a unique
 file name.
 
+### IAM Authentication
+
+The lambda-mips-api /balances endpoint requires AWS IAM authentication. When
+`MipApiRegion` is provided, this lambda signs HTTP requests with SigV4 using
+botocore. The `MipApiExecuteArn` parameter must be configured with the execute-api
+ARN for the /balances endpoint to allow the lambda to invoke it.
+
+If `MipApiRegion` is not provided, requests are sent unsigned (backward-compatible
+behavior for testing or non-IAM environments).
+
 ## Parameters
 
 ### SSM Parameters
@@ -40,9 +50,12 @@ The following template parameters are used to configure behavior:
 
 | Template Parameter | Type                            | Default               | Description                                                                                        |
 |---------------------|---------------------------------|-----------------------|----------------------------------------------------------------------------------------------------|
-| Schedule            | EventBridge Schedule Expression | `cron(30 10 2 * ? *)` | EventBridge schedule for running the lambda                                                        |
+| Schedule            | EventBridge Schedule Expression | `cron(0 4 ? * MON *)` | EventBridge schedule for running the lambda                                                        |
 | SsmPrefix           | String                          | /floqast-sftp         | Prepend this value to the SSM parameter keys                                                       |
 | PeriodCount         | Number                          | 2                     | The number of activity periods (months) to report on, starting at the present and moving backwards |
+| MipApiBalances      | String                          | ""                    | API Gateway URL to lambda-mips-api /balances endpoint (required for IAM auth, not CloudFront)     |
+| MipApiRegion        | String                          | us-east-1             | AWS region of lambda-mips-api API Gateway (used for SigV4 request signing)                        |
+| MipApiExecuteArn    | String                          | ""                    | ARN for execute-api:Invoke on mips-api /balances endpoint (required for IAM policy)               |
 
 
 ## Development
