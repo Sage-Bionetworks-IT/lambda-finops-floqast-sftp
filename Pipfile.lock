@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "ed5182bd2c25b2b08bc280eace2d07bbd887a4ae861283b7492a148364485168"
+            "sha256": "46f77505d059d3e3df0397292b29608dd5b9f50d4e0060fcd6d59f79ef3f6bc4"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -954,10 +954,12 @@
         },
         "paramiko-mock": {
             "hashes": [
-                "sha256:c5531019d18fd3bf8e0d3fb34f22b56f16ec1be79e11979403e169f9ebb12618"
+                "sha256:163ee2e33ded6e29d2769205ebcb7cefc29b156fe7250a90283f41942f40a0d0",
+                "sha256:ea496f6e61549f89bb37c7d48b63843d675b41e6ad8ea80865c5b085f3ccdc85"
             ],
             "index": "pypi",
-            "version": "==1.0.2"
+            "markers": "python_version >= '3.10'",
+            "version": "==2.0.1"
         },
         "pluggy": {
             "hashes": [
@@ -974,6 +976,14 @@
             ],
             "markers": "python_version >= '3.10'",
             "version": "==3.0"
+        },
+        "pygments": {
+            "hashes": [
+                "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f",
+                "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176"
+            ],
+            "markers": "python_version >= '3.9'",
+            "version": "==2.20.0"
         },
         "pynacl": {
             "hashes": [
@@ -1008,12 +1018,12 @@
         },
         "pytest": {
             "hashes": [
-                "sha256:2cf0005922c6ace4a3e2ec8b4080eb0d9753fdc93107415332f50ce9e7994280",
-                "sha256:b090cdf5ed60bf4c45261be03239c2c1c22df034fbffe691abe93cd80cea01d8"
+                "sha256:2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9",
+                "sha256:b86ada508af81d19edeb213c681b1d48246c1a91d304c6c81a427674c17eb91c"
             ],
             "index": "pypi",
-            "markers": "python_version >= '3.7'",
-            "version": "==7.4.4"
+            "markers": "python_version >= '3.10'",
+            "version": "==9.0.3"
         },
         "pytest-mock": {
             "hashes": [
