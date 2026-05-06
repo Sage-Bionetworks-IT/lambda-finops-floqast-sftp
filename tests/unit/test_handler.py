@@ -69,9 +69,9 @@ test_current_datetime = datetime.fromisoformat(test_current_datetime_iso)
 test_filename = "Sage-Balances-March-2025-20250404101010.csv"
 
 test_csv_base_url = "https://example.com/balances"
-test_csv_full_url = f"https://example.com/balances?show_inactive_codes&target_date={test_target_date_iso}"
+test_csv_full_url = f"https://example.com/balances?show_inactive_codes=on&target_date={test_target_date_iso}"
 test_csv_base_url_extra = "https://example.com/balances?foo"
-test_csv_full_url_extra = f"https://example.com/balances?foo&show_inactive_codes&target_date={test_target_date_iso}"
+test_csv_full_url_extra = f"https://example.com/balances?foo&show_inactive_codes=on&target_date={test_target_date_iso}"
 
 test_csv_data = f"""AccountName,PeriodStart,PeriodEnd,Activity
 Test,{test_target_date_iso},{test_target_date_iso},0"""

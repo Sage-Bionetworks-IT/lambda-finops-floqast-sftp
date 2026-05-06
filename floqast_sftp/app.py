@@ -211,7 +211,7 @@ def get_csv_url(event, when):
     """
 
     base_url = get_event_param(event, "mip_api_balances_url")
-    url_add = f"show_inactive_codes&target_date={when}"
+    url_add = f"show_inactive_codes=on&target_date={when}"
     if "?" in base_url:
         full_url = f"{base_url}&{url_add}"
     else:
