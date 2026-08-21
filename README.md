@@ -28,13 +28,14 @@ parameters in SSM with a configurable prefix. By default, the prefix is `/floqas
 
 #### Required SSM Parameters
 
-The `user`, `pass`, and `host` parameters are required for SFTP authentication.
+The `user`, `pass`, `host`, and `hostkey` parameters are required for SFTP authentication.
 
-| Parameter | Description    |
-|-----------|----------------|
-| user      | SFTP username  |
-| pass      | SFTP password  |
-| host      | SFTP host name |
+| Parameter | Description                                                                                          |
+|-----------|-------------------------------------------------------------------------------------------------------|
+| user      | SFTP username                                                                                          |
+| pass      | SFTP password                                                                                          |
+| host      | SFTP host name                                                                                         |
+| hostkey   | Expected SHA256 fingerprint of the server's host key, e.g. `SHA256:YSBmYWtlIGtleSBmaW5nZXJwcmludCA=`  |
 
 #### Optional SSM Parameter
 

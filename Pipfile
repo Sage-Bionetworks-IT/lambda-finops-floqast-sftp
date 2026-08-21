@@ -10,6 +10,7 @@ requests-mock = "~=1.10"
 paramiko-mock = "~=2.0"
 boto3 = "~=1.24"
 coverage = "~=7.3"
+pre-commit = "*"
 
 [packages]
 crhelper = "~=2.0"

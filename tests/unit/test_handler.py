@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import os
 from datetime import date, datetime
@@ -17,6 +19,7 @@ test_ssm_values = {
     "user": "username",
     "pass": "password",
     "host": "example.com",
+    "hostkey": "SHA256:YSBmYWtlIGtleSBmaW5nZXJwcmludCA=",
     "port": 22,
 }
 stub_ssm_response = {
@@ -30,6 +33,7 @@ test_ssm_values_opt = {
     "user": "username",
     "pass": "password",
     "host": "example.com",
+    "hostkey": "SHA256:YSBmYWtlIGtleSBmaW5nZXJwcmludCA=",
 }
 stub_ssm_response_opt = {
     "Parameters": [
@@ -49,11 +53,24 @@ stub_ssm_response_missing = {
     ]
 }
 
+test_ssm_values_missing_hostkey = {
+    "user": "username",
+    "pass": "password",
+    "host": "example.com",
+}
+stub_ssm_response_missing_hostkey = {
+    "Parameters": [
+        {"Name": test_ssm_prefix + k, "Value": str(v)}
+        for k, v in test_ssm_values_missing_hostkey.items()
+    ]
+}
+
 test_ssm_values_invalid = {
     "user": "username",
     "pass": "password",
     "host": "example.com",
     "port": "invalid",
+    "hostkey": "SHA256:YSBmYWtlIGtleSBmaW5nZXJwcmludCA=",
 }
 stub_ssm_response_invalid = {
     "Parameters": [
@@ -75,6 +92,11 @@ test_csv_full_url_extra = f"https://example.com/balances?foo&show_inactive_codes
 
 test_csv_data = f"""AccountName,PeriodStart,PeriodEnd,Activity
 Test,{test_target_date_iso},{test_target_date_iso},0"""
+
+test_hostkey_bytes = b"fake-host-key-bytes"
+test_hostkey_fingerprint = (
+    "SHA256:" + base64.b64encode(hashlib.sha256(test_hostkey_bytes).digest()).decode()
+)
 
 
 @pytest.mark.parametrize(
@@ -104,6 +126,18 @@ def test_ssm_params_missing(mocker):
             app.get_ssm_params(test_ssm_prefix)
 
 
+def test_ssm_params_missing_hostkey(mocker):
+    mocker.patch.dict(os.environ, {"AWS_DEFAULT_REGION": "test"})
+    app.ssm_client = boto3.client("ssm")
+    with Stubber(app.ssm_client) as ssm_client:
+        ssm_client.add_response(
+            "get_parameters_by_path", stub_ssm_response_missing_hostkey
+        )
+
+        with pytest.raises(KeyError, match="hostkey"):
+            app.get_ssm_params(test_ssm_prefix)
+
+
 def test_ssm_params_invalid(mocker):
     mocker.patch.dict(os.environ, {"AWS_DEFAULT_REGION": "test"})
     app.ssm_client = boto3.client("ssm")
@@ -112,6 +146,150 @@ def test_ssm_params_invalid(mocker):
 
         with pytest.raises(ValueError):
             app.get_ssm_params(test_ssm_prefix)
+
+
+def test_verify_host_key_match(mocker):
+    mock_key = mocker.MagicMock()
+    mock_key.asbytes.return_value = test_hostkey_bytes
+    mock_transport = mocker.MagicMock(spec=paramiko.Transport)
+    mock_transport.get_remote_server_key.return_value = mock_key
+
+    app.verify_host_key(mock_transport, test_hostkey_fingerprint)
+
+
+def test_verify_host_key_mismatch(mocker):
+    mock_key = mocker.MagicMock()
+    mock_key.asbytes.return_value = test_hostkey_bytes
+    mock_transport = mocker.MagicMock(spec=paramiko.Transport)
+    mock_transport.get_remote_server_key.return_value = mock_key
+
+    with pytest.raises(paramiko.SSHException):
+        app.verify_host_key(mock_transport, "SHA256:wrong")
+
+
+def test_verify_host_key_with_padding(mocker):
+    """Test that fingerprints with base64 padding (=) are handled correctly."""
+    mock_key = mocker.MagicMock()
+    mock_key.asbytes.return_value = test_hostkey_bytes
+    mock_transport = mocker.MagicMock(spec=paramiko.Transport)
+    mock_transport.get_remote_server_key.return_value = mock_key
+
+    # Add padding to the expected fingerprint
+    fingerprint_with_padding = test_hostkey_fingerprint + "="
+    app.verify_host_key(mock_transport, fingerprint_with_padding)
+
+
+def test_verify_host_key_with_whitespace(mocker):
+    """Test that fingerprints with whitespace are handled correctly."""
+    mock_key = mocker.MagicMock()
+    mock_key.asbytes.return_value = test_hostkey_bytes
+    mock_transport = mocker.MagicMock(spec=paramiko.Transport)
+    mock_transport.get_remote_server_key.return_value = mock_key
+
+    # Add whitespace around the expected fingerprint
+    fingerprint_with_whitespace = f"  {test_hostkey_fingerprint}  "
+    app.verify_host_key(mock_transport, fingerprint_with_whitespace)
+
+
+def test_get_sftp_client(mocker):
+    mock_key = mocker.MagicMock()
+    mock_key.asbytes.return_value = test_hostkey_bytes
+    mock_transport = mocker.MagicMock(spec=paramiko.Transport)
+    mock_transport.get_remote_server_key.return_value = mock_key
+    mocker.patch("floqast_sftp.app.paramiko.Transport", return_value=mock_transport)
+
+    mock_client = mocker.MagicMock(spec=paramiko.SFTPClient)
+    mocker.patch(
+        "floqast_sftp.app.paramiko.SFTPClient.from_transport",
+        return_value=mock_client,
+    )
+
+    auth = {
+        "host": "example.com",
+        "port": 22,
+        "user": "username",
+        "pass": "password",
+        "hostkey": test_hostkey_fingerprint,
+    }
+    found_transport, found_client = app.get_sftp_client(auth)
+
+    mock_transport.start_client.assert_called_once()
+    mock_transport.auth_password.assert_called_once_with(
+        username="username", password="password"
+    )
+    assert found_transport is mock_transport
+    assert found_client is mock_client
+
+
+def test_get_sftp_client_hostkey_mismatch(mocker):
+    mock_key = mocker.MagicMock()
+    mock_key.asbytes.return_value = test_hostkey_bytes
+    mock_transport = mocker.MagicMock(spec=paramiko.Transport)
+    mock_transport.get_remote_server_key.return_value = mock_key
+    mocker.patch("floqast_sftp.app.paramiko.Transport", return_value=mock_transport)
+
+    auth = {
+        "host": "example.com",
+        "port": 22,
+        "user": "username",
+        "pass": "password",
+        "hostkey": "SHA256:wrong",
+    }
+    with pytest.raises(paramiko.SSHException):
+        app.get_sftp_client(auth)
+
+    mock_transport.auth_password.assert_not_called()
+    mock_transport.close.assert_called_once()
+
+
+def test_get_sftp_client_auth_failure(mocker):
+    """Test that transport is closed when authentication fails."""
+    mock_key = mocker.MagicMock()
+    mock_key.asbytes.return_value = test_hostkey_bytes
+    mock_transport = mocker.MagicMock(spec=paramiko.Transport)
+    mock_transport.get_remote_server_key.return_value = mock_key
+    mock_transport.auth_password.side_effect = paramiko.AuthenticationException(
+        "Auth failed"
+    )
+    mocker.patch("floqast_sftp.app.paramiko.Transport", return_value=mock_transport)
+
+    auth = {
+        "host": "example.com",
+        "port": 22,
+        "user": "username",
+        "pass": "password",
+        "hostkey": test_hostkey_fingerprint,
+    }
+    with pytest.raises(paramiko.AuthenticationException):
+        app.get_sftp_client(auth)
+
+    mock_transport.close.assert_called_once()
+
+
+def test_get_sftp_client_sftp_creation_failure(mocker):
+    """Test that transport is closed when SFTP client creation fails."""
+    mock_key = mocker.MagicMock()
+    mock_key.asbytes.return_value = test_hostkey_bytes
+    mock_transport = mocker.MagicMock(spec=paramiko.Transport)
+    mock_transport.get_remote_server_key.return_value = mock_key
+    mocker.patch("floqast_sftp.app.paramiko.Transport", return_value=mock_transport)
+
+    mocker.patch(
+        "floqast_sftp.app.paramiko.SFTPClient.from_transport",
+        side_effect=paramiko.SSHException("SFTP setup failed"),
+    )
+
+    auth = {
+        "host": "example.com",
+        "port": 22,
+        "user": "username",
+        "pass": "password",
+        "hostkey": test_hostkey_fingerprint,
+    }
+    with pytest.raises(paramiko.SSHException, match="SFTP setup failed"):
+        app.get_sftp_client(auth)
+
+    mock_transport.close.assert_called_once()
 
 
 def test_file_name(mocker):

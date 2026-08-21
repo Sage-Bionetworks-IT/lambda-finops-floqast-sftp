@@ -1,4 +1,6 @@
+import base64
 import csv
+import hashlib
 import io
 import logging
 import time
@@ -73,7 +75,7 @@ def get_ssm_params(prefix):
         params[_key] = p["Value"]
 
     # check for required strings
-    for _key in ["user", "pass", "host"]:
+    for _key in ["user", "pass", "host", "hostkey"]:
         if _key not in params:
             raise KeyError(f"Key '{_key}' not found in SSM.")
 
@@ -91,6 +93,33 @@ def get_ssm_params(prefix):
     return params
 
 
+def verify_host_key(transport, expected_fingerprint):
+    """
+    Verify the server's host key against a known SHA256 fingerprint.
+
+    Parameters
+    ----------
+    transport: paramiko.Transport
+        Connected transport to read the remote server key from.
+    expected_fingerprint: str
+        Expected fingerprint, e.g. 'SHA256:YSBmYWtlIGtleSBmaW5nZXJwcmludCA='.
+
+    Raises
+    ------
+    paramiko.SSHException
+        If the server's host key does not match the expected fingerprint.
+
+    """
+    key = transport.get_remote_server_key()
+    digest = hashlib.sha256(key.asbytes()).digest()
+    fingerprint = "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+    if fingerprint != expected_fingerprint.strip().rstrip("="):
+        raise paramiko.SSHException(
+            f"Host key fingerprint mismatch: expected {expected_fingerprint}, "
+            f"got {fingerprint}"
+        )
+
+
 def get_sftp_client(auth):
     """
     Create an SFTP client.
@@ -99,17 +128,24 @@ def get_sftp_client(auth):
     ----------
     auth: dict
         Dictionary providing authentication details:
-        'user', 'pass', 'host', 'port'.
+        'user', 'pass', 'host', 'port', 'hostkey'.
 
     Returns
     -------
-    paramiko.SFTPClient
+    tuple (paramiko.Transport, paramiko.SFTPClient)
+        The connected SSH transport and an SFTP client created from it.
 
     """
-    # From https://medium.com/@geeky_vm/event-based-sftp-using-aws-lambda-python-66c092f41dd9
     transport = paramiko.Transport((auth["host"], auth["port"]))
-    transport.connect(username=auth["user"], password=auth["pass"])
-    client = paramiko.SFTPClient.from_transport(transport)
+    try:
+        transport.start_client()
+        verify_host_key(transport, auth["hostkey"])
+        transport.auth_password(username=auth["user"], password=auth["pass"])
+        client = paramiko.SFTPClient.from_transport(transport)
+    except Exception as exc:
+        transport.close()
+        raise exc
+
     return transport, client
 
 
