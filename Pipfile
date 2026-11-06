@@ -14,7 +14,7 @@ pre-commit = "*"
 
 [packages]
 crhelper = "~=2.0"
-paramiko = "~=3.5"
+paramiko = "~=5.0"
 requests = "~=2.32"
 
 [requires]
